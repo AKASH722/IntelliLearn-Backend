@@ -19,7 +19,7 @@ public class Video {
     @JoinColumn(referencedColumnName = "id")
     private SubTopic subTopic;
     private String videoUrl;
-    private String audioUrl;
-    private String transcriptUrl;
+    @Column(columnDefinition = "TEXT")
+    private String transcript;
     private String title;
 }

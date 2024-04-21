@@ -2,7 +2,9 @@ package com.codex.intellilearn.service;
 
 import com.codex.intellilearn.dto.common.CommonErrorResponse;
 import com.codex.intellilearn.dto.common.CommonResponse;
+import com.codex.intellilearn.model.Video;
 import com.codex.intellilearn.repo.SubTopicRepo;
+import com.codex.intellilearn.repo.VideoRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
@@ -15,6 +17,8 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.nio.file.Files;
@@ -28,19 +32,25 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class VideoService {
     private final SubTopicRepo subTopicRepo;
+    private final VideoRepo videoRepo;
     private final String UPLOAD_DIR = "D:/Projects/IntelliLearn/IntelliLearn Backend/src/main/resources/uploads/";
     @Value("${fastapi.url}")
     private String fastApiUrl;
 
-    public CommonResponse<String> convertVideoToAudio(MultipartFile videoFile) {
+    public CommonResponse<String> convertVideoToAudio(MultipartFile videoFile, Integer subtopic, String title) {
         try {
             String videoFilePath = saveUploadedFile(videoFile);
-            String audioUrl = callFastApiToConvertVideoToAudio(videoFilePath);
-
-            if (audioUrl != null && !audioUrl.isEmpty()) {
-                String audioFilePath = downloadAudio(audioUrl);
-                String transcribeFilePath = getTranscript(audioFilePath);
-                return new CommonResponse<>("Video converted to audio successfully.");
+            String transcript = callFastApiToGetTranscript(videoFilePath);
+            if (transcript != null && !transcript.isEmpty()) {
+                videoRepo.save(
+                    Video.builder()
+                        .subTopic(subTopicRepo.findById(subtopic).get())
+                        .transcript(transcript)
+                        .videoUrl(videoFilePath)
+                        .title(title)
+                        .build()
+                );
+                return new CommonResponse<>("Video converted to transcript successfully.");
             } else {
                 return new CommonResponse<>(new CommonErrorResponse(
                     new Date(),
@@ -59,10 +69,6 @@ public class VideoService {
         }
     }
 
-    private String getTranscript(String audioFilePath) {
-        return null;
-    }
-
     private String saveUploadedFile(MultipartFile file) throws IOException {
         String fileName = UUID.randomUUID() + ".mp4";
         Path uploadPath = Paths.get(UPLOAD_DIR + "/video");
@@ -76,7 +82,7 @@ public class VideoService {
         return filePath.toString();
     }
 
-    private String callFastApiToConvertVideoToAudio(String videoFilePath) {
+    public String callFastApiToGetTranscript(String videoFilePath) {
         RestTemplate restTemplate = new RestTemplate();
 
         HttpHeaders headers = new HttpHeaders();
@@ -89,7 +95,35 @@ public class VideoService {
         ResponseEntity<String> response = restTemplate.postForEntity(fastApiUrl, requestEntity, String.class);
 
         if (response.getStatusCode() == HttpStatus.OK) {
-            return response.getBody();
+            // Parse the JSON response to get the transcript URL
+            String transcriptUrl = response.getBody();
+
+            if (Objects.nonNull(transcriptUrl) && transcriptUrl.startsWith("{\"transcript_url\":")) {
+                transcriptUrl = transcriptUrl.substring(transcriptUrl.indexOf("http"), transcriptUrl.lastIndexOf("\""));
+
+                // Download the transcript file from the URL
+                ResponseEntity<byte[]> fileResponse = restTemplate.getForEntity(transcriptUrl, byte[].class);
+
+                if (fileResponse.getStatusCode() == HttpStatus.OK) {
+                    try {
+                        // Save the byte array to a temporary file
+                        String transcriptTempFilePath = File.createTempFile("transcript_", ".txt").getAbsolutePath();
+                        FileOutputStream fos = new FileOutputStream(transcriptTempFilePath);
+                        fos.write(Objects.requireNonNull(fileResponse.getBody()));
+                        fos.close();
+
+                        // Read the content of the temporary file into a string
+
+                        return new String(Files.readAllBytes(new File(transcriptTempFilePath).toPath()));
+                    } catch (Exception e) {
+                        return null;
+                    }
+                } else {
+                    return null;
+                }
+            } else {
+                return null;
+            }
         } else {
             return null;
         }

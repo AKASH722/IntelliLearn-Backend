@@ -20,7 +20,7 @@ public class VideoController {
 
     @PostMapping("/upload")
     public ResponseEntity<?> uploadVideo(@RequestParam("file") MultipartFile file) {
-        CommonResponse<String> commonResponse = videoService.convertVideoToAudio(file);
+        CommonResponse<String> commonResponse = videoService.convertVideoToAudio(file, 1, "Class");
         if (commonResponse.getHasException()) {
             return ResponseEntity.internalServerError().body(commonResponse.getErrorResponse());
         }
